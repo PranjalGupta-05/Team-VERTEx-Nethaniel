@@ -1,5 +1,11 @@
-import { CircleHelp } from "lucide-react";
-import { ModulePlaceholder } from "@/components/ui/module-placeholder";
+import type { Metadata } from "next";
+import { HelpView } from "@/components/help/help-view";
+
+export const metadata: Metadata = {
+  title: "Help & Support",
+  description: "Forensic knowledge base, system diagnostics and support ticket center.",
+};
+
 export default function HelpPage() {
-  return <ModulePlaceholder eyebrow="Operator support" title="CrimeVision field guide" description="Workflow guidance, model limitations, and evidence-handling procedures." icon={CircleHelp} />;
+  return <HelpView />;
 }

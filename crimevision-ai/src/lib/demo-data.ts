@@ -62,7 +62,7 @@ export const demoCase: CaseDetail = {
   occurredAt: "2026-07-28T21:42:18.000Z",
   owner: {
     id: "dev-investigator",
-    displayName: "Alex Morgan",
+    displayName: "Lead Investigator",
     email: "investigator@crimevision.local"
   },
   evidence: [
