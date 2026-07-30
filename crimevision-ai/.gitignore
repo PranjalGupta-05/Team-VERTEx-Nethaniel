@@ -1,0 +1,16 @@
+node_modules/
+.next/
+dist/
+coverage/
+.env
+.env.local
+*.log
+storage/raw/*
+storage/processed/*
+!storage/raw/.gitkeep
+!storage/processed/.gitkeep
+ai_engine/models/*
+!ai_engine/models/.gitkeep
+__pycache__/
+.pytest_cache/
+.venv/

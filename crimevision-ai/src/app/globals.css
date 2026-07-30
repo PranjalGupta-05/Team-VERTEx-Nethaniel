@@ -1,0 +1,196 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --ink: #090c0e;
+  --panel: #111619;
+  --panel-raised: #151c1f;
+  --line: rgba(206, 232, 229, 0.11);
+  --line-strong: rgba(206, 232, 229, 0.22);
+  --text: #eff8f5;
+  --muted: #8b9997;
+  --cyan: #54e7da;
+  --acid: #c5f66f;
+  --amber: #f4c66a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--ink);
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 80% -10%, rgba(84, 231, 218, 0.08), transparent 32rem),
+    linear-gradient(rgba(255, 255, 255, 0.012) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px),
+    var(--ink);
+  background-size: auto, 36px 36px, 36px 36px, auto;
+  font-family: Inter, Aptos, "Segoe UI", sans-serif;
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  color: #07100f;
+  background: var(--cyan);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2b3638;
+  border-radius: 999px;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.app-main {
+  min-width: 0;
+  padding: 0 34px 40px;
+}
+
+.eyebrow {
+  color: var(--cyan);
+  font-family: "IBM Plex Mono", "Cascadia Code", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.surface {
+  background: linear-gradient(145deg, rgba(22, 29, 32, 0.96), rgba(14, 19, 21, 0.96));
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.16);
+}
+
+.surface-interactive {
+  transition: border-color 180ms ease, transform 180ms ease, background 180ms ease;
+}
+
+.surface-interactive:hover {
+  background: linear-gradient(145deg, rgba(25, 34, 36, 0.98), rgba(14, 20, 22, 0.98));
+  border-color: var(--line-strong);
+  transform: translateY(-2px);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: #c9d6d4;
+  background: rgba(255, 255, 255, 0.025);
+  font-family: "IBM Plex Mono", "Cascadia Code", monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 10px currentColor;
+}
+
+.status-processing .status-dot,
+.status-open .status-dot {
+  background: var(--cyan);
+}
+
+.status-review .status-dot {
+  background: var(--amber);
+}
+
+.status-closed .status-dot,
+.status-ready .status-dot {
+  background: var(--acid);
+}
+
+.status-failed .status-dot {
+  background: #ff7a7a;
+}
+
+.mono {
+  font-family: "IBM Plex Mono", "Cascadia Code", monospace;
+}
+
+.skeleton {
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+  position: relative;
+}
+
+.skeleton::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+@keyframes shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes pulse-ring {
+  0%, 100% { opacity: .4; transform: scale(.8); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@media (max-width: 980px) {
+  .app-shell {
+    grid-template-columns: 76px minmax(0, 1fr);
+  }
+
+  .app-main {
+    padding-inline: 20px;
+  }
+}
+
+@media (max-width: 680px) {
+  .app-shell {
+    display: block;
+  }
+
+  .app-main {
+    padding: 0 14px 92px;
+  }
+}
