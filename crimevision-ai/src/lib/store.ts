@@ -1,20 +1,27 @@
 /**
- * In-memory data store that replaces PostgreSQL + Prisma.
- * Pre-seeded with demo data matching the original seed.ts.
- * Data resets on server restart — this is intentional for a simple dev setup.
+ * Data store powered by Supabase PostgreSQL.
+ * Drop-in async replacement for the original InMemoryStore.
+ * Every public method keeps the same shape as before so API routes
+ * only need to add `await`.
  */
 
-import { randomUUID, createHash } from "node:crypto";
+import { supabase } from "./supabase";
+import { createHash } from "node:crypto";
+import type {
+  CaseStatus,
+  EvidenceStatus,
+  AnalysisType,
+  UserRow,
+  CaseRow,
+  EvidenceRow,
+  AIResultRow,
+  AuditLogRow,
+} from "./database.types";
 
-// ─── Enums ───────────────────────────────────────────────────────────────────
-
+export type { CaseStatus, EvidenceStatus, AnalysisType };
 export type UserRole = "ADMIN" | "INVESTIGATOR" | "ANALYST";
-export type CaseStatus = "OPEN" | "PROCESSING" | "REVIEW" | "CLOSED";
-export type EvidenceStatus = "UPLOADED" | "QUEUED" | "PROCESSING" | "READY" | "FAILED";
-export type AnalysisType = "DETECTION" | "OCR" | "TRANSCRIPTION" | "TRACKING" | "RECONSTRUCTION";
 
-// ─── Models ──────────────────────────────────────────────────────────────────
-
+// Re-export interfaces matching the old store shapes (camelCase for API consumers)
 export interface User {
   id: string;
   email: string | null;
@@ -79,208 +86,179 @@ export interface AuditLog {
   createdAt: string;
 }
 
-// ─── Store ───────────────────────────────────────────────────────────────────
+// ─── Row ↔ camelCase helpers ────────────────────────────────────────────────
 
-class InMemoryStore {
-  public users: User[] = [];
-  public cases: Case[] = [];
-  public evidence: Evidence[] = [];
-  public aiResults: AIResult[] = [];
-  public auditLogs: AuditLog[] = [];
+function rowToUser(r: UserRow): User {
+  return {
+    id: r.id,
+    email: r.email ?? null,
+    displayName: r.display_name ?? null,
+    role: r.role as UserRole,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
 
-  constructor() {
-    this.seed();
-  }
+function rowToCase(r: CaseRow): Case {
+  return {
+    id: r.id,
+    reference: r.reference,
+    title: r.title,
+    description: r.description ?? null,
+    location: r.location ?? null,
+    occurredAt: r.occurred_at ?? null,
+    status: r.status as CaseStatus,
+    priority: r.priority,
+    ownerId: r.owner_id,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
 
-  private seed(): void {
-    const now = new Date().toISOString();
+function rowToEvidence(r: EvidenceRow): Evidence {
+  return {
+    id: r.id,
+    caseId: r.case_id,
+    originalName: r.original_name,
+    storageKey: r.storage_key,
+    fileHash: r.file_hash,
+    byteSize: r.byte_size,
+    mimeType: r.mime_type,
+    modality: r.modality,
+    metadata: r.metadata ?? {},
+    status: r.status as EvidenceStatus,
+    capturedAt: r.captured_at ?? null,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
 
-    // User
-    this.users.push({
-      id: "dev-investigator",
-      email: "investigator@crimevision.local",
-      displayName: "Alex Morgan",
-      role: "INVESTIGATOR",
-      createdAt: now,
-      updatedAt: now,
-    });
+function rowToAIResult(r: AIResultRow): AIResult {
+  return {
+    id: r.id,
+    evidenceId: r.evidence_id,
+    type: r.type as AnalysisType,
+    model: r.model,
+    modelVersion: r.model_version,
+    confidence: r.confidence ?? null,
+    occurredAt: r.occurred_at ?? null,
+    payload: r.payload ?? {},
+    createdAt: r.created_at,
+  };
+}
 
-    // Cases
-    const cases: Omit<Case, "ownerId" | "createdAt" | "updatedAt">[] = [
-      {
-        id: "01d1d683-511d-48fb-b4f8-c1f7a72a24d8",
-        reference: "CV-2026-041287",
-        title: "Riverside Warehouse Incident",
-        description: "Multi-camera reconstruction of a nighttime warehouse entry and vehicle departure.",
-        location: "Riverside Industrial District",
-        occurredAt: "2026-07-28T21:42:18.000Z",
-        status: "PROCESSING",
-        priority: 1,
-      },
-      {
-        id: "8d937796-9149-4d50-8e25-f919332705d5",
-        reference: "CV-2026-039104",
-        title: "Northbridge Transit Review",
-        description: "Transit platform evidence correlation and person-of-interest movement analysis.",
-        location: "Northbridge Central Station",
-        occurredAt: null,
-        status: "REVIEW",
-        priority: 2,
-      },
-      {
-        id: "9cd24116-d808-4212-8c37-279018710240",
-        reference: "CV-2026-036882",
-        title: "Arden Avenue Collision",
-        description: "Drone and bodycam photogrammetry for collision sequence reconstruction.",
-        location: "Arden Avenue & 14th Street",
-        occurredAt: null,
-        status: "OPEN",
-        priority: 3,
-      },
-    ];
+function rowToAuditLog(r: AuditLogRow): AuditLog {
+  return {
+    id: r.id,
+    caseId: r.case_id ?? null,
+    actorId: r.actor_id,
+    action: r.action,
+    resourceType: r.resource_type,
+    resourceId: r.resource_id,
+    ipAddress: r.ip_address ?? null,
+    userAgent: r.user_agent ?? null,
+    details: r.details ?? {},
+    createdAt: r.created_at,
+  };
+}
 
-    for (const c of cases) {
-      this.cases.push({
-        ...c,
-        ownerId: "dev-investigator",
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
+// ─── Store ──────────────────────────────────────────────────────────────────
 
-    // Evidence
-    const evidenceId = "f38ae8b9-e102-4e9e-bef9-8e8c97d5c3df";
-    this.evidence.push({
-      id: evidenceId,
-      caseId: cases[0]!.id,
-      originalName: "dock-camera-04.mp4",
-      storageKey: `raw/cases/${cases[0]!.id}/${evidenceId}-dock-camera-04.mp4`,
-      fileHash: "f2cba54f73a42ec207dc6a71c3377ce96eb35f158662ac4c6d79cc5ccf25b509",
-      byteSize: "184993201",
-      mimeType: "video/mp4",
-      modality: "CCTV",
-      metadata: { cameraId: "DOCK-04", fps: 30, integrityAlgorithm: "SHA-256" },
-      status: "READY",
-      capturedAt: "2026-07-28T21:42:18.000Z",
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    // AI Results
-    this.aiResults.push(
-      {
-        id: randomUUID(),
-        evidenceId,
-        type: "DETECTION",
-        model: "YOLOv8-x",
-        modelVersion: "8.3",
-        confidence: 0.943,
-        occurredAt: "2026-07-28T21:44:03.000Z",
-        payload: { label: "vehicle", subtype: "dark sedan", bbox: [0.21, 0.44, 0.68, 0.91] },
-        createdAt: now,
-      },
-      {
-        id: randomUUID(),
-        evidenceId,
-        type: "OCR",
-        model: "PaddleOCR",
-        modelVersion: "3.0",
-        confidence: 0.887,
-        occurredAt: "2026-07-28T21:44:07.000Z",
-        payload: { label: "license plate", text: "K7A-4821", orientation: 2.4 },
-        createdAt: now,
-      },
-      {
-        id: randomUUID(),
-        evidenceId,
-        type: "DETECTION",
-        model: "YOLOv8-x",
-        modelVersion: "8.3",
-        confidence: 0.912,
-        occurredAt: "2026-07-28T21:45:31.000Z",
-        payload: { label: "person", trackId: "P-07", bbox: [0.47, 0.18, 0.61, 0.88] },
-        createdAt: now,
-      }
-    );
-
-    // Initial audit log
-    this.auditLogs.push({
-      id: randomUUID(),
-      actorId: "dev-investigator",
-      caseId: cases[0]!.id,
-      action: "SEED_INITIALIZED",
-      resourceType: "Case",
-      resourceId: cases[0]!.id,
-      ipAddress: null,
-      userAgent: null,
-      details: { source: "development-seed" },
-      createdAt: now,
-    });
-  }
-
+class SupabaseStore {
   // ─── User helpers ─────────────────────────────────────────────────────────
 
-  public findOrCreateUser(id: string, data?: Partial<User>): User {
-    let user = this.users.find((u) => u.id === id);
-    if (!user) {
-      user = {
+  public async findOrCreateUser(id: string, data?: Partial<User>): Promise<User> {
+    const { data: existing } = await (supabase as any).from("users").select("*").eq("id", id).single();
+
+    if (existing) {
+      if (data) {
+        const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        if (data.role !== undefined) updates.role = data.role;
+        if (data.email !== undefined) updates.email = data.email;
+        if (data.displayName !== undefined) updates.display_name = data.displayName;
+        const { data: updated } = await (supabase as any).from("users").update(updates as any).eq("id", id).select("*").single();
+        return rowToUser(updated!);
+      }
+      return rowToUser(existing);
+    }
+
+    const now = new Date().toISOString();
+    const { data: created } = await (supabase as any).from("users")
+      .insert({
         id,
         email: data?.email ?? null,
-        displayName: data?.displayName ?? null,
+        display_name: data?.displayName ?? null,
         role: data?.role ?? "ANALYST",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      this.users.push(user);
-    } else if (data) {
-      if (data.role !== undefined) user.role = data.role;
-      if (data.email !== undefined) user.email = data.email;
-      if (data.displayName !== undefined) user.displayName = data.displayName;
-      user.updatedAt = new Date().toISOString();
-    }
-    return user;
+        created_at: now,
+        updated_at: now,
+      })
+      .select("*")
+      .single();
+
+    return rowToUser(created!);
   }
 
   // ─── Case helpers ─────────────────────────────────────────────────────────
 
-  public listCases(filters?: { search?: string; status?: CaseStatus; ownerId?: string }) {
-    let result = [...this.cases];
-    if (filters?.ownerId) result = result.filter((c) => c.ownerId === filters.ownerId);
-    if (filters?.status) result = result.filter((c) => c.status === filters.status);
+  public async listCases(filters?: { search?: string; status?: CaseStatus; ownerId?: string }) {
+    let query = (supabase as any).from("cases").select("*").order("updated_at", { ascending: false }).limit(100);
+
+    if (filters?.ownerId) query = query.eq("owner_id", filters.ownerId);
+    if (filters?.status) query = query.eq("status", filters.status);
     if (filters?.search) {
-      const q = filters.search.toLowerCase();
-      result = result.filter(
-        (c) =>
-          c.title.toLowerCase().includes(q) ||
-          c.reference.toLowerCase().includes(q) ||
-          (c.location?.toLowerCase().includes(q) ?? false)
-      );
+      const q = filters.search;
+      query = query.or(`title.ilike.%${q}%,reference.ilike.%${q}%,location.ilike.%${q}%`);
     }
-    result.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    return result.slice(0, 100).map((c) => this.caseSummary(c));
+
+    const { data: rows, error } = await query;
+    if (error) {
+      console.error("Supabase listCases error:", error);
+    }
+    if (!rows) return [];
+
+    const result = [];
+    for (const r of rows) {
+      result.push(await this.caseSummary(rowToCase(r)));
+    }
+    return result;
   }
 
-  public findCaseById(id: string) {
-    const c = this.cases.find((c) => c.id === id);
-    if (!c) return null;
-    const owner = this.users.find((u) => u.id === c.ownerId);
-    const evidenceList = this.evidence
-      .filter((e) => e.caseId === c.id)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .map((e) => ({
-        id: e.id,
-        originalName: e.originalName,
-        mimeType: e.mimeType,
-        modality: e.modality,
-        fileHash: e.fileHash,
-        byteSize: e.byteSize,
-        status: e.status,
-        capturedAt: e.capturedAt,
-        createdAt: e.createdAt,
-        _count: { analyses: this.aiResults.filter((r) => r.evidenceId === e.id).length },
-      }));
+  public async findCaseById(id: string) {
+    const { data: row } = await (supabase as any).from("cases").select("*").eq("id", id).single();
+    if (!row) return null;
+
+    const c = rowToCase(row);
+    const owner = await this.getUserById(c.ownerId);
+
+    const { data: evidenceRows } = await (supabase as any).from("evidence")
+      .select("*")
+      .eq("case_id", c.id)
+      .order("created_at", { ascending: false });
+
+    const evidenceList = [];
+    for (const e of evidenceRows ?? []) {
+      const ev = rowToEvidence(e);
+      const { count } = await (supabase as any).from("ai_results")
+        .select("*", { count: "exact", head: true })
+        .eq("evidence_id", ev.id);
+
+      evidenceList.push({
+        id: ev.id,
+        originalName: ev.originalName,
+        mimeType: ev.mimeType,
+        modality: ev.modality,
+        fileHash: ev.fileHash,
+        byteSize: ev.byteSize,
+        status: ev.status,
+        capturedAt: ev.capturedAt,
+        createdAt: ev.createdAt,
+        _count: { analyses: count ?? 0 },
+      });
+    }
+
+    const summary = await this.caseSummary(c);
     return {
-      ...this.caseSummary(c),
+      ...summary,
       occurredAt: c.occurredAt,
       owner: {
         id: owner?.id ?? c.ownerId,
@@ -291,7 +269,7 @@ class InMemoryStore {
     };
   }
 
-  public createCase(data: {
+  public async createCase(data: {
     ownerId: string;
     title: string;
     description?: string | null;
@@ -302,38 +280,64 @@ class InMemoryStore {
     const now = new Date().toISOString();
     const year = new Date().getUTCFullYear();
     const ref = `CV-${year}-${String(Math.floor(100000 + Math.random() * 900000))}`;
-    const c: Case = {
-      id: randomUUID(),
-      reference: ref,
-      title: data.title,
-      description: data.description ?? null,
-      location: data.location ?? null,
-      occurredAt: data.occurredAt ?? null,
-      status: "OPEN",
-      priority: data.priority,
-      ownerId: data.ownerId,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.cases.push(c);
-    return this.caseSummary(c);
+
+    const { data: row, error } = await (supabase as any).from("cases")
+      .insert({
+        reference: ref,
+        title: data.title,
+        description: data.description ?? null,
+        location: data.location ?? null,
+        occurred_at: data.occurredAt ?? null,
+        status: "OPEN",
+        priority: data.priority,
+        owner_id: data.ownerId,
+        created_at: now,
+        updated_at: now,
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error("Supabase insert error:", error);
+      throw new Error(`Supabase error: ${error.message}`);
+    }
+
+    return this.caseSummary(rowToCase(row!));
+
   }
 
-  public updateCase(id: string, data: Partial<Pick<Case, "title" | "description" | "location" | "occurredAt" | "priority" | "status">>) {
-    const c = this.cases.find((c) => c.id === id);
-    if (!c) return null;
-    if (data.title !== undefined) c.title = data.title;
-    if (data.description !== undefined) c.description = data.description;
-    if (data.location !== undefined) c.location = data.location;
-    if (data.occurredAt !== undefined) c.occurredAt = data.occurredAt;
-    if (data.priority !== undefined) c.priority = data.priority;
-    if (data.status !== undefined) c.status = data.status;
-    c.updatedAt = new Date().toISOString();
-    return this.caseSummary(c);
+  public async updateCase(
+    id: string,
+    data: Partial<Pick<Case, "title" | "description" | "location" | "occurredAt" | "priority" | "status">>
+  ) {
+    // Check if case exists
+    const { data: existing } = await (supabase as any).from("cases").select("id").eq("id", id).single();
+    if (!existing) return null;
+
+    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (data.title !== undefined) updates.title = data.title;
+    if (data.description !== undefined) updates.description = data.description;
+    if (data.location !== undefined) updates.location = data.location;
+    if (data.occurredAt !== undefined) updates.occurred_at = data.occurredAt;
+    if (data.priority !== undefined) updates.priority = data.priority;
+    if (data.status !== undefined) updates.status = data.status;
+
+    const { data: row } = await (supabase as any).from("cases").update(updates).eq("id", id).select("*").single();
+
+    return this.caseSummary(rowToCase(row!));
   }
 
-  private caseSummary(c: Case) {
-    const owner = this.users.find((u) => u.id === c.ownerId);
+  private async caseSummary(c: Case) {
+    const owner = await this.getUserById(c.ownerId);
+
+    const { count: evidenceCount } = await (supabase as any).from("evidence")
+      .select("*", { count: "exact", head: true })
+      .eq("case_id", c.id);
+
+    const { count: auditCount } = await (supabase as any).from("audit_logs")
+      .select("*", { count: "exact", head: true })
+      .eq("case_id", c.id);
+
     return {
       id: c.id,
       reference: c.reference,
@@ -351,78 +355,134 @@ class InMemoryStore {
         email: owner?.email ?? null,
       },
       _count: {
-        evidence: this.evidence.filter((e) => e.caseId === c.id).length,
-        auditLogs: this.auditLogs.filter((a) => a.caseId === c.id).length,
+        evidence: evidenceCount ?? 0,
+        auditLogs: auditCount ?? 0,
       },
     };
   }
 
+  private async getUserById(id: string): Promise<User | null> {
+    const { data } = await (supabase as any).from("users").select("*").eq("id", id).single();
+    return data ? rowToUser(data) : null;
+  }
+
   // ─── Evidence helpers ──────────────────────────────────────────────────────
 
-  public findEvidenceById(id: string) {
-    const e = this.evidence.find((e) => e.id === id);
-    if (!e) return null;
+  public async findEvidenceById(id: string) {
+    const { data: row } = await (supabase as any).from("evidence").select("*").eq("id", id).single();
+    if (!row) return null;
+
+    const ev = rowToEvidence(row);
+
+    const { data: resultRows } = await (supabase as any).from("ai_results")
+      .select("*")
+      .eq("evidence_id", ev.id)
+      .order("created_at", { ascending: false });
+
     return {
-      ...e,
-      analyses: this.aiResults
-        .filter((r) => r.evidenceId === e.id)
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+      ...ev,
+      analyses: (resultRows ?? []).map(rowToAIResult),
     };
   }
 
-  public createEvidence(data: Omit<Evidence, "createdAt" | "updatedAt">) {
+  public async createEvidence(data: Omit<Evidence, "createdAt" | "updatedAt">) {
     const now = new Date().toISOString();
-    const e: Evidence = { ...data, createdAt: now, updatedAt: now };
-    this.evidence.push(e);
-    return e;
+    const { data: row } = await (supabase as any).from("evidence")
+      .insert({
+        id: data.id,
+        case_id: data.caseId,
+        original_name: data.originalName,
+        storage_key: data.storageKey,
+        file_hash: data.fileHash,
+        byte_size: data.byteSize,
+        mime_type: data.mimeType,
+        modality: data.modality,
+        metadata: data.metadata,
+        status: data.status,
+        captured_at: data.capturedAt,
+        created_at: now,
+        updated_at: now,
+      })
+      .select("*")
+      .single();
+
+    return rowToEvidence(row!);
   }
 
-  public updateEvidenceStatus(id: string, status: EvidenceStatus) {
-    const e = this.evidence.find((e) => e.id === id);
-    if (e) {
-      e.status = status;
-      e.updatedAt = new Date().toISOString();
-    }
-    return e;
+  public async updateEvidenceStatus(id: string, status: EvidenceStatus) {
+    const { data: row } = await (supabase as any).from("evidence")
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    return row ? rowToEvidence(row) : undefined;
   }
 
   // ─── Dashboard helpers ────────────────────────────────────────────────────
 
-  public dashboardSummary() {
-    const openCases = this.cases.filter((c) => c.status !== "CLOSED").length;
-    const evidenceCount = this.evidence.length;
-    const pendingAnalysis = this.evidence.filter((e) =>
-      ["UPLOADED", "QUEUED", "PROCESSING"].includes(e.status)
-    ).length;
-    const hashCount = this.evidence.filter((e) => e.fileHash.length > 0).length;
-    const integrityCoverage = evidenceCount === 0 ? 100 : Math.round((hashCount / evidenceCount) * 10000) / 100;
+  public async dashboardSummary() {
+    const { count: openCases } = await (supabase as any).from("cases")
+      .select("*", { count: "exact", head: true })
+      .neq("status", "CLOSED");
 
-    const recentCases = [...this.cases]
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-      .slice(0, 6)
-      .map((c) => this.caseSummary(c));
+    const { count: evidenceCount } = await (supabase as any).from("evidence")
+      .select("*", { count: "exact", head: true });
+
+    const { count: pendingAnalysis } = await (supabase as any).from("evidence")
+      .select("*", { count: "exact", head: true })
+      .in("status", ["UPLOADED", "QUEUED", "PROCESSING"]);
+
+    const { count: hashCount } = await (supabase as any).from("evidence")
+      .select("*", { count: "exact", head: true })
+      .neq("file_hash", "");
+
+    const evCount = evidenceCount ?? 0;
+    const integrityCoverage = evCount === 0 ? 100 : Math.round(((hashCount ?? 0) / evCount) * 10000) / 100;
+
+    const { data: recentRows } = await (supabase as any).from("cases")
+      .select("*")
+      .order("updated_at", { ascending: false })
+      .limit(6);
+
+    const recentCases = [];
+    for (const r of recentRows ?? []) {
+      recentCases.push(await this.caseSummary(rowToCase(r)));
+    }
 
     return {
-      metrics: { activeCases: openCases, evidenceItems: evidenceCount, pendingAnalysis, integrityCoverage },
+      metrics: {
+        activeCases: openCases ?? 0,
+        evidenceItems: evCount,
+        pendingAnalysis: pendingAnalysis ?? 0,
+        integrityCoverage,
+      },
       recentCases,
     };
   }
 
   // ─── Timeline helpers ─────────────────────────────────────────────────────
 
-  public timelineForCase(caseId: string) {
-    const caseEvidence = this.evidence.filter((e) => e.caseId === caseId);
-    const evidenceIds = new Set(caseEvidence.map((e) => e.id));
-    const results = this.aiResults
-      .filter((r) => evidenceIds.has(r.evidenceId))
-      .sort((a, b) => {
-        const dateA = a.occurredAt ?? a.createdAt;
-        const dateB = b.occurredAt ?? b.createdAt;
-        return new Date(dateA).getTime() - new Date(dateB).getTime();
-      });
+  public async timelineForCase(caseId: string) {
+    // Get all evidence for this case
+    const { data: evidenceRows } = await (supabase as any).from("evidence")
+      .select("*")
+      .eq("case_id", caseId);
 
-    return results.map((result) => {
-      const ev = caseEvidence.find((e) => e.id === result.evidenceId)!;
+    const caseEvidence = (evidenceRows ?? []).map(rowToEvidence);
+    const evidenceIds = caseEvidence.map((e: any) => e.id);
+
+    if (evidenceIds.length === 0) return [];
+
+    const { data: resultRows } = await (supabase as any).from("ai_results")
+      .select("*")
+      .in("evidence_id", evidenceIds)
+      .order("occurred_at", { ascending: true, nullsFirst: false });
+
+    const results = (resultRows ?? []).map(rowToAIResult);
+
+    return results.map((result: any) => {
+      const ev = caseEvidence.find((e: any) => e.id === result.evidenceId)!;
       const payload = result.payload;
       const label = typeof payload.label === "string" ? payload.label : result.type.toLowerCase();
       const description =
@@ -436,7 +496,7 @@ class InMemoryStore {
         evidenceId: result.evidenceId,
         evidenceName: ev.originalName,
         type: result.type,
-        title: label.replace(/\b\w/g, (ch) => ch.toUpperCase()),
+        title: label.replace(/\b\w/g, (ch: any) => ch.toUpperCase()),
         description,
         confidence: result.confidence,
         occurredAt: result.occurredAt ?? ev.capturedAt ?? ev.createdAt,
@@ -447,10 +507,27 @@ class InMemoryStore {
 
   // ─── Chat helpers ──────────────────────────────────────────────────────────
 
-  public chatAnswer(caseId: string, query: string) {
-    const caseEvidence = this.evidence.filter((e) => e.caseId === caseId);
-    const evidenceIds = new Set(caseEvidence.map((e) => e.id));
-    const allResults = this.aiResults.filter((r) => evidenceIds.has(r.evidenceId));
+  public async chatAnswer(caseId: string, query: string) {
+    const { data: evidenceRows } = await (supabase as any).from("evidence")
+      .select("*")
+      .eq("case_id", caseId);
+
+    const caseEvidence = (evidenceRows ?? []).map(rowToEvidence);
+    const evidenceIds = caseEvidence.map((e: any) => e.id);
+
+    if (evidenceIds.length === 0) {
+      return {
+        answer: "The indexed evidence does not contain a detection or transcript that supports that conclusion. I will not speculate beyond the available case data.",
+        citations: [] as { evidenceId: string; evidenceName: string; resultId: string; timestamp: string | null; confidence: number | null }[],
+        grounded: true,
+      };
+    }
+
+    const { data: resultRows } = await (supabase as any).from("ai_results")
+      .select("*")
+      .in("evidence_id", evidenceIds);
+
+    const allResults = (resultRows ?? []).map(rowToAIResult);
 
     const stopWords = new Set(["the", "was", "were", "there", "this", "that", "with", "from", "have", "what", "when", "where", "does", "did"]);
     const terms = [...new Set(query.toLowerCase().match(/[a-z0-9]{3,}/g) ?? [])].filter(
@@ -458,13 +535,13 @@ class InMemoryStore {
     );
 
     const matches = allResults
-      .map((result) => {
+      .map((result: any) => {
         const payloadText = JSON.stringify(result.payload).toLowerCase();
         const score = terms.filter((t) => payloadText.includes(t)).length;
-        return { evidence: caseEvidence.find((e) => e.id === result.evidenceId)!, result, score };
+        return { evidence: caseEvidence.find((e: any) => e.id === result.evidenceId)!, result, score };
       })
-      .filter((m) => m.score > 0)
-      .sort((a, b) => b.score - a.score || (b.result.confidence ?? 0) - (a.result.confidence ?? 0));
+      .filter((m: any) => m.score > 0)
+      .sort((a: any, b: any) => b.score - a.score || (b.result.confidence ?? 0) - (a.result.confidence ?? 0));
 
     if (matches.length === 0) {
       return {
@@ -475,7 +552,7 @@ class InMemoryStore {
     }
 
     const top = matches.slice(0, 5);
-    const statements = top.map(({ evidence, result }) => {
+    const statements = top.map(({ evidence, result }: any) => {
       const payload = result.payload;
       const subject = String(payload.label ?? payload.text ?? result.type).slice(0, 180);
       const conf = result.confidence ? ` at ${(result.confidence * 100).toFixed(1)}% confidence` : "";
@@ -485,7 +562,7 @@ class InMemoryStore {
 
     return {
       answer: `Based strictly on indexed case evidence: ${statements.join("; ")}.`,
-      citations: top.map(({ evidence, result }) => ({
+      citations: top.map(({ evidence, result }: any) => ({
         evidenceId: evidence.id,
         evidenceName: evidence.originalName,
         resultId: result.id,
@@ -498,25 +575,42 @@ class InMemoryStore {
 
   // ─── Report helpers ────────────────────────────────────────────────────────
 
-  public createManifest(caseId: string) {
-    const c = this.cases.find((c) => c.id === caseId);
-    if (!c) return null;
-    const owner = this.users.find((u) => u.id === c.ownerId);
-    const evidenceList = this.evidence
-      .filter((e) => e.caseId === caseId)
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-    const auditCount = this.auditLogs.filter((a) => a.caseId === caseId).length;
+  public async createManifest(caseId: string) {
+    const { data: row } = await (supabase as any).from("cases").select("*").eq("id", caseId).single();
+    if (!row) return null;
+
+    const c = rowToCase(row);
+    const owner = await this.getUserById(c.ownerId);
+
+    const { data: evidenceRows } = await (supabase as any).from("evidence")
+      .select("*")
+      .eq("case_id", caseId)
+      .order("created_at", { ascending: true });
+
+    const evidenceList = (evidenceRows ?? []).map(rowToEvidence);
+
+    const { count: auditCount } = await (supabase as any).from("audit_logs")
+      .select("*", { count: "exact", head: true })
+      .eq("case_id", caseId);
 
     const generatedAt = new Date().toISOString();
-    const evidenceManifest = evidenceList.map((e) => ({
-      id: e.id,
-      originalName: e.originalName,
-      sha256: e.fileHash,
-      mimeType: e.mimeType,
-      byteSize: e.byteSize,
-      status: e.status,
-      analysisCount: this.aiResults.filter((r) => r.evidenceId === e.id).length,
-    }));
+    const evidenceManifest = [];
+    for (const e of evidenceList) {
+      const { count } = await (supabase as any).from("ai_results")
+        .select("*", { count: "exact", head: true })
+        .eq("evidence_id", e.id);
+
+      evidenceManifest.push({
+        id: e.id,
+        originalName: e.originalName,
+        sha256: e.fileHash,
+        mimeType: e.mimeType,
+        byteSize: e.byteSize,
+        status: e.status,
+        analysisCount: count ?? 0,
+      });
+    }
+
     const canonical = JSON.stringify({ caseId, reference: c.reference, generatedAt, evidence: evidenceManifest });
     const certHash = createHash("sha256").update(canonical).digest("hex");
 
@@ -537,13 +631,13 @@ class InMemoryStore {
         owner: { id: owner?.id ?? c.ownerId, displayName: owner?.displayName ?? null, email: owner?.email ?? null },
       },
       evidence: evidenceManifest,
-      chainOfCustodyEvents: auditCount,
+      chainOfCustodyEvents: auditCount ?? 0,
     };
   }
 
   // ─── Audit helpers ─────────────────────────────────────────────────────────
 
-  public recordAudit(data: {
+  public async recordAudit(data: {
     actorId: string;
     action: string;
     resourceType: string;
@@ -553,44 +647,74 @@ class InMemoryStore {
     userAgent?: string;
     details?: Record<string, unknown>;
   }) {
-    const log: AuditLog = {
-      id: randomUUID(),
-      actorId: data.actorId,
-      caseId: data.caseId ?? null,
-      action: data.action,
-      resourceType: data.resourceType,
-      resourceId: data.resourceId,
-      ipAddress: data.ipAddress ?? null,
-      userAgent: data.userAgent ?? null,
-      details: data.details ?? {},
-      createdAt: new Date().toISOString(),
-    };
-    this.auditLogs.push(log);
-    return log;
+    const { data: row } = await (supabase as any).from("audit_logs")
+      .insert({
+        actor_id: data.actorId,
+        case_id: data.caseId ?? null,
+        action: data.action,
+        resource_type: data.resourceType,
+        resource_id: data.resourceId,
+        ip_address: data.ipAddress ?? null,
+        user_agent: data.userAgent ?? null,
+        details: data.details ?? {},
+      })
+      .select("*")
+      .single();
+
+    return rowToAuditLog(row!);
   }
 
-  public listAuditForCase(caseId: string) {
-    return this.auditLogs
-      .filter((a) => a.caseId === caseId)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .slice(0, 100)
-      .map((a) => {
-        const actor = this.users.find((u) => u.id === a.actorId);
-        return {
-          ...a,
-          actor: { displayName: actor?.displayName ?? null, email: actor?.email ?? null, role: actor?.role ?? "ANALYST" },
-        };
+  public async listAuditForCase(caseId: string) {
+    const { data: rows } = await (supabase as any).from("audit_logs")
+      .select("*")
+      .eq("case_id", caseId)
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    const result = [];
+    for (const r of rows ?? []) {
+      const log = rowToAuditLog(r);
+      const actor = await this.getUserById(log.actorId);
+      result.push({
+        ...log,
+        actor: {
+          displayName: actor?.displayName ?? null,
+          email: actor?.email ?? null,
+          role: actor?.role ?? "ANALYST",
+        },
       });
+    }
+    return result;
+  }
+
+  // ─── AI Result helpers (used by analysis run route) ────────────────────────
+
+  public async createAIResult(data: {
+    evidenceId: string;
+    type: AnalysisType;
+    model: string;
+    modelVersion: string;
+    confidence: number | null;
+    occurredAt: string | null;
+    payload: Record<string, unknown>;
+  }) {
+    const { data: row } = await (supabase as any).from("ai_results")
+      .insert({
+        evidence_id: data.evidenceId,
+        type: data.type,
+        model: data.model,
+        model_version: data.modelVersion,
+        confidence: data.confidence,
+        occurred_at: data.occurredAt,
+        payload: data.payload,
+      })
+      .select("*")
+      .single();
+
+    return rowToAIResult(row!);
   }
 }
 
-// Singleton — persists across API route invocations in dev mode (hot reload preserves globalThis)
-declare global {
-  var crimeVisionStore: InMemoryStore | undefined;
-}
+// Singleton
+export const store = new SupabaseStore();
 
-export const store = globalThis.crimeVisionStore ?? new InMemoryStore();
-
-if (process.env.NODE_ENV !== "production") {
-  globalThis.crimeVisionStore = store;
-}

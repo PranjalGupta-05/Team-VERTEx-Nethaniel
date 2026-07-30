@@ -4,12 +4,12 @@ import { store } from "@/lib/store";
 export async function POST(request: NextRequest, context: { params: Promise<{ caseId: string }> }) {
   try {
     const { caseId } = await context.params;
-    const manifest = store.createManifest(caseId);
+    const manifest = await store.createManifest(caseId);
     if (!manifest) {
       return NextResponse.json({ error: "Case not found" }, { status: 404 });
     }
 
-    store.recordAudit({
+    await store.recordAudit({
       actorId: "dev-investigator",
       action: "MANIFEST_EXPORTED",
       resourceType: "Case",

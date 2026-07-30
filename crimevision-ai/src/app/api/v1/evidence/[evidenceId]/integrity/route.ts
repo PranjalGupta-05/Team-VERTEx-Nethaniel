@@ -4,7 +4,7 @@ import { store } from "@/lib/store";
 export async function GET(request: NextRequest, context: { params: Promise<{ evidenceId: string }> }) {
   try {
     const { evidenceId } = await context.params;
-    const evidence = store.findEvidenceById(evidenceId);
+    const evidence = await store.findEvidenceById(evidenceId);
     
     if (!evidence) {
       return NextResponse.json({ error: "Evidence not found" }, { status: 404 });

@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Missing caseId or file" }, { status: 400 });
     }
 
-    const caseData = store.findCaseById(caseId);
+    const caseData = await store.findCaseById(caseId);
     if (!caseData) {
       return NextResponse.json({ error: "Case not found" }, { status: 404 });
     }
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     else if (file.type.startsWith("video/")) modality = "VIDEO";
     else if (file.type.startsWith("audio/")) modality = "AUDIO";
 
-    const evidence = store.createEvidence({
+    const evidence = await store.createEvidence({
       id: evidenceId,
       caseId,
       originalName: file.name,
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
       capturedAt: new Date().toISOString(),
     });
 
-    store.recordAudit({
+    await store.recordAudit({
       actorId: "dev-investigator",
       action: "EVIDENCE_UPLOADED",
       resourceType: "Evidence",

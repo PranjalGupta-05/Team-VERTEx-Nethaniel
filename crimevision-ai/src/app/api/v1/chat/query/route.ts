@@ -18,14 +18,14 @@ export async function POST(request: NextRequest) {
     const { caseId, query } = parsed.data;
     
     // Verify case exists
-    const caseData = store.findCaseById(caseId);
+    const caseData = await store.findCaseById(caseId);
     if (!caseData) {
       return NextResponse.json({ error: "Case not found" }, { status: 404 });
     }
 
-    const result = store.chatAnswer(caseId, query);
+    const result = await store.chatAnswer(caseId, query);
 
-    store.recordAudit({
+    await store.recordAudit({
       actorId: "dev-investigator",
       action: "CHAT_QUERY",
       resourceType: "Case",

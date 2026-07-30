@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     if (search !== null) filters.search = search;
     if (status !== null) filters.status = status;
 
-    const cases = store.listCases(filters);
+    const cases = await store.listCases(filters);
     return NextResponse.json({ data: cases });
   } catch (error) {
     return NextResponse.json({ error: "Failed to fetch cases" }, { status: 500 });
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid payload", details: parsed.error.format() }, { status: 400 });
     }
 
-    const newCase = store.createCase({
+    const newCase = await store.createCase({
       title: parsed.data.title,
       ownerId: "dev-investigator", // Hardcoded for simplified version
       priority: parsed.data.priority,
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       ...(parsed.data.occurredAt !== undefined && { occurredAt: parsed.data.occurredAt }),
     });
 
-    store.recordAudit({
+    await store.recordAudit({
       actorId: "dev-investigator",
       action: "CASE_CREATED",
       resourceType: "Case",
@@ -54,6 +54,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ data: newCase }, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ error: "Failed to create case" }, { status: 500 });
+    console.error("Error creating case:", error);
+    return NextResponse.json({ error: "Failed to create case", details: String(error) }, { status: 500 });
   }
 }

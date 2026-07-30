@@ -9,7 +9,7 @@ const runAnalysisSchema = z.object({
 export async function POST(request: NextRequest, context: { params: Promise<{ evidenceId: string }> }) {
   try {
     const { evidenceId } = await context.params;
-    const evidence = store.findEvidenceById(evidenceId);
+    const evidence = await store.findEvidenceById(evidenceId);
     
     if (!evidence) {
       return NextResponse.json({ error: "Evidence not found" }, { status: 404 });
@@ -21,28 +21,24 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ev
       return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
     }
 
-    // In a real app, this would queue a job via BullMQ to the Python AI engine.
-    // For this simple Next.js app, we just simulate success.
+    // Mark evidence as processing
+    await store.updateEvidenceStatus(evidenceId, "PROCESSING");
     
-    store.updateEvidenceStatus(evidenceId, "PROCESSING");
-    
-    // Simulate async processing...
-    setTimeout(() => {
-      store.updateEvidenceStatus(evidenceId, "READY");
-      store.aiResults.push({
-        id: crypto.randomUUID(),
-        evidenceId,
-        type: parsed.data.type,
-        model: "SimulationModel",
-        modelVersion: "1.0",
-        confidence: 0.95,
-        occurredAt: new Date().toISOString(),
-        payload: { summary: `Simulated ${parsed.data.type} analysis complete.` },
-        createdAt: new Date().toISOString(),
-      });
-    }, 2000);
+    // Create a simulated AI result in the database
+    await store.createAIResult({
+      evidenceId,
+      type: parsed.data.type,
+      model: "SimulationModel",
+      modelVersion: "1.0",
+      confidence: 0.95,
+      occurredAt: new Date().toISOString(),
+      payload: { summary: `Simulated ${parsed.data.type} analysis complete.` },
+    });
 
-    store.recordAudit({
+    // Mark evidence as ready
+    await store.updateEvidenceStatus(evidenceId, "READY");
+
+    await store.recordAudit({
       actorId: "dev-investigator",
       action: "ANALYSIS_QUEUED",
       resourceType: "Evidence",

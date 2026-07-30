@@ -14,12 +14,12 @@ const updateCaseSchema = z.object({
 export async function GET(request: NextRequest, context: { params: Promise<{ caseId: string }> }) {
   try {
     const { caseId } = await context.params;
-    const caseData = store.findCaseById(caseId);
+    const caseData = await store.findCaseById(caseId);
     if (!caseData) {
       return NextResponse.json({ error: "Case not found" }, { status: 404 });
     }
 
-    store.recordAudit({
+    await store.recordAudit({
       actorId: "dev-investigator",
       action: "CASE_VIEWED",
       resourceType: "Case",
@@ -51,12 +51,12 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ c
       ...(priority !== undefined && { priority }),
       ...(status !== undefined && { status }),
     };
-    const updatedCase = store.updateCase(caseId, updateData);
+    const updatedCase = await store.updateCase(caseId, updateData);
     if (!updatedCase) {
       return NextResponse.json({ error: "Case not found" }, { status: 404 });
     }
 
-    store.recordAudit({
+    await store.recordAudit({
       actorId: "dev-investigator",
       action: "CASE_UPDATED",
       resourceType: "Case",
