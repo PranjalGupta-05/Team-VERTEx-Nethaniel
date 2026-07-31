@@ -1,5 +1,11 @@
-import { Settings } from "lucide-react";
-import { ModulePlaceholder } from "@/components/ui/module-placeholder";
+import type { Metadata } from "next";
+import { SettingsView } from "@/components/settings/settings-view";
+
+export const metadata: Metadata = {
+  title: "Settings",
+  description: "Configure investigator profile, AI detection models, and system preferences.",
+};
+
 export default function SettingsPage() {
-  return <ModulePlaceholder eyebrow="Administration" title="System controls" description="Configure identity, storage, model adapters, retention, and alerting." icon={Settings} />;
+  return <SettingsView />;
 }

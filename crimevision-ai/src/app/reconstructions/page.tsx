@@ -1,5 +1,11 @@
-import { Boxes } from "lucide-react";
-import { ModulePlaceholder } from "@/components/ui/module-placeholder";
+import type { Metadata } from "next";
+import { ReconstructionsView } from "@/components/reconstructions/reconstructions-view";
+
+export const metadata: Metadata = {
+  title: "3D Crime Scene Reconstruction",
+  description: "Interactive WebGL 3D crime scene reconstruction with bullet trajectory analysis.",
+};
+
 export default function ReconstructionsPage() {
-  return <ModulePlaceholder eyebrow="3D laboratory" title="Scene reconstructions" description="Manage COLMAP alignments, Gaussian splats, and courtroom-ready views." icon={Boxes} />;
+  return <ReconstructionsView />;
 }

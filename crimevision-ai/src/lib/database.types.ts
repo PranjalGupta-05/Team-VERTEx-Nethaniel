@@ -79,6 +79,44 @@ export interface AuditLogRow {
 export interface Database {
   public: {
     Tables: {
+      profiles: {
+        Row: {
+          id: string;
+          full_name: string | null;
+          email: string | null;
+          role: string;
+          avatar_url?: string | null;
+          phone?: string | null;
+          department?: string | null;
+          badge_number?: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id: string;
+          full_name?: string | null;
+          email?: string | null;
+          role?: string;
+          avatar_url?: string | null;
+          phone?: string | null;
+          department?: string | null;
+          badge_number?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<{
+          id: string;
+          full_name: string | null;
+          email: string | null;
+          role: string;
+          avatar_url: string | null;
+          phone: string | null;
+          department: string | null;
+          badge_number: string | null;
+          updated_at: string;
+        }>;
+        Relationships: any[];
+      };
       users: {
         Row: UserRow;
         Insert: Partial<UserRow> & { id?: string };

@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { ApiProvider } from "@/lib/api-provider";
-import { Sidebar } from "@/components/shell/sidebar";
-import { Topbar } from "@/components/shell/topbar";
 
 export const metadata: Metadata = {
   title: {
@@ -18,13 +16,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body>
         <ApiProvider>
-          <div className="app-shell">
-            <Sidebar />
-            <main className="app-main">
-              <Topbar />
-              {children}
-            </main>
-          </div>
+          {children}
         </ApiProvider>
       </body>
     </html>
