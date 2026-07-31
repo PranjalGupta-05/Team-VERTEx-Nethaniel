@@ -102,6 +102,8 @@ export function Topbar({ onLogout }: TopbarProps) {
     if (typeof window !== "undefined") {
       localStorage.removeItem("auth_user_name");
       localStorage.removeItem("auth_user_email");
+      localStorage.removeItem("crimevision_authenticated");
+      sessionStorage.removeItem("splash_seen");
     }
     try {
       if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
