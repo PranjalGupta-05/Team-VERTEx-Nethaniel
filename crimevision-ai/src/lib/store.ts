@@ -635,6 +635,146 @@ class SupabaseStore {
     };
   }
 
+  /**
+   * Generate a comprehensive report aggregating all case data:
+   * case summary, evidence inventory, timeline, AI findings,
+   * confidence scores, and metadata.
+   */
+  public async generateFullReport(caseId: string) {
+    const { data: row } = await (supabase as any).from("cases").select("*").eq("id", caseId).single();
+    if (!row) return null;
+
+    const c = rowToCase(row);
+    const owner = await this.getUserById(c.ownerId);
+
+    // Evidence list
+    const { data: evidenceRows } = await (supabase as any).from("evidence")
+      .select("*")
+      .eq("case_id", caseId)
+      .order("created_at", { ascending: true });
+
+    const evidenceList = (evidenceRows ?? []).map(rowToEvidence);
+    const evidenceIds = evidenceList.map((e: Evidence) => e.id);
+
+    // All AI results for this case
+    let allResults: AIResult[] = [];
+    if (evidenceIds.length > 0) {
+      const { data: resultRows } = await (supabase as any).from("ai_results")
+        .select("*")
+        .in("evidence_id", evidenceIds)
+        .order("created_at", { ascending: false });
+      allResults = (resultRows ?? []).map(rowToAIResult);
+    }
+
+    // Audit count
+    const { count: auditCount } = await (supabase as any).from("audit_logs")
+      .select("*", { count: "exact", head: true })
+      .eq("case_id", caseId);
+
+    // Build evidence manifest
+    const evidenceManifest = evidenceList.map((e: Evidence) => {
+      const analysisCount = allResults.filter((r: AIResult) => r.evidenceId === e.id).length;
+      return {
+        id: e.id,
+        originalName: e.originalName,
+        sha256: e.fileHash,
+        mimeType: e.mimeType,
+        byteSize: e.byteSize,
+        modality: e.modality,
+        status: e.status,
+        capturedAt: e.capturedAt,
+        analysisCount,
+      };
+    });
+
+    // Build timeline
+    const timeline = allResults
+      .filter((r: AIResult) => r.occurredAt)
+      .sort((a: AIResult, b: AIResult) => new Date(a.occurredAt!).getTime() - new Date(b.occurredAt!).getTime())
+      .map((r: AIResult) => {
+        const ev = evidenceList.find((e: Evidence) => e.id === r.evidenceId)!;
+        const payload = r.payload;
+        const label = typeof payload.label === "string" ? payload.label : r.type.toLowerCase();
+        const description =
+          typeof payload.text === "string"
+            ? payload.text
+            : typeof payload.summary === "string"
+              ? (payload.summary as string)
+              : `${label} identified by ${r.model}.`;
+        return {
+          id: r.id,
+          evidenceName: ev.originalName,
+          type: r.type,
+          title: label.replace(/\b\w/g, (ch: string) => ch.toUpperCase()),
+          description,
+          confidence: r.confidence,
+          occurredAt: r.occurredAt ?? ev.capturedAt ?? ev.createdAt,
+        };
+      });
+
+    // Build AI findings
+    const aiFindings = allResults.map((r: AIResult) => {
+      const ev = evidenceList.find((e: Evidence) => e.id === r.evidenceId)!;
+      return {
+        evidenceName: ev.originalName,
+        type: r.type,
+        model: r.model,
+        confidence: r.confidence,
+        occurredAt: r.occurredAt,
+        payload: r.payload,
+      };
+    });
+
+    // Build confidence summary
+    const withConfidence = allResults.filter((r: AIResult) => r.confidence != null);
+    const overall = withConfidence.length > 0
+      ? withConfidence.reduce((sum: number, r: AIResult) => sum + r.confidence!, 0) / withConfidence.length
+      : null;
+
+    const byType: Record<string, { avg: number; count: number }> = {};
+    for (const r of allResults) {
+      if (r.confidence == null) continue;
+      if (!byType[r.type]) byType[r.type] = { avg: 0, count: 0 };
+      byType[r.type]!.avg += r.confidence;
+      byType[r.type]!.count += 1;
+    }
+    for (const key of Object.keys(byType)) {
+      byType[key]!.avg = byType[key]!.avg / byType[key]!.count;
+    }
+
+    // Certification hash
+    const generatedAt = new Date().toISOString();
+    const canonical = JSON.stringify({ caseId, reference: c.reference, generatedAt, evidence: evidenceManifest });
+    const certHash = createHash("sha256").update(canonical).digest("hex");
+
+    return {
+      reportVersion: "1.0",
+      generatedAt,
+      certification: {
+        algorithm: "SHA-256",
+        hash: certHash,
+        statement: "This report cryptographically binds the listed evidence integrity hashes and AI analysis results.",
+      },
+      case: {
+        id: c.id,
+        reference: c.reference,
+        title: c.title,
+        description: c.description,
+        location: c.location,
+        status: c.status,
+        priority: c.priority,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+        owner: { id: owner?.id ?? c.ownerId, displayName: owner?.displayName ?? null, email: owner?.email ?? null },
+      },
+      evidence: evidenceManifest,
+      timeline,
+      aiFindings,
+      confidenceSummary: { overall, byType },
+      chainOfCustodyEvents: auditCount ?? 0,
+    };
+  }
+
   // ─── Audit helpers ─────────────────────────────────────────────────────────
 
   public async recordAudit(data: {

@@ -7,6 +7,7 @@ import {
   CircleHelp,
   DatabaseZap,
   FileClock,
+  FileText,
   Settings,
   ShieldCheck
 } from "lucide-react";
@@ -18,7 +19,8 @@ const primaryLinks = [
   { href: "/cases", label: "Cases", icon: BriefcaseBusiness },
   { href: "/evidence", label: "Evidence", icon: DatabaseZap },
   { href: "/reconstructions", label: "Reconstructions", icon: Boxes },
-  { href: "/audit", label: "Audit trail", icon: FileClock }
+  { href: "/audit", label: "Audit trail", icon: FileClock },
+  { href: "/reports", label: "Reports", icon: FileText }
 ];
 
 const secondaryLinks = [

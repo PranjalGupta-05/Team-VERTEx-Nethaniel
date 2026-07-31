@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Box, Download, Ellipsis, Fingerprint, MapPin, Share2 } from "lucide-react";
+import { ArrowLeft, Box, Download, Ellipsis, FileText, Fingerprint, MapPin, Share2 } from "lucide-react";
 import Link from "next/link";
 import { useApi } from "@/lib/api-provider";
 import { demoCase, demoTimeline } from "@/lib/demo-data";
@@ -11,6 +11,7 @@ import { ChatPanel } from "./chat-panel";
 import { EvidenceRail } from "./evidence-rail";
 import { EvidenceTimeline } from "./evidence-timeline";
 import { SceneViewer } from "./scene-viewer";
+import { ReportGenerator } from "./report-generator";
 
 export function CaseWorkspace({ caseId }: { caseId: string }) {
   const { request } = useApi();
@@ -18,6 +19,7 @@ export function CaseWorkspace({ caseId }: { caseId: string }) {
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [source, setSource] = useState<"live" | "demo">("live");
   const [exporting, setExporting] = useState(false);
+  const [showReport, setShowReport] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -82,6 +84,9 @@ export function CaseWorkspace({ caseId }: { caseId: string }) {
         <div className="flex gap-2">
           <button className="grid h-9 w-9 place-items-center rounded-xl border border-white/[0.09] bg-white/[0.025] text-[#85928f] hover:text-white"><Share2 size={14} /></button>
           <button className="grid h-9 w-9 place-items-center rounded-xl border border-white/[0.09] bg-white/[0.025] text-[#85928f] hover:text-white"><Ellipsis size={15} /></button>
+          <button onClick={() => setShowReport(true)} className="flex items-center gap-2 rounded-xl border border-cyan/40 bg-cyan/[0.08] px-4 py-2.5 text-[9px] font-bold text-cyan transition hover:bg-cyan/[0.14]">
+            <FileText size={13} /> GENERATE REPORT
+          </button>
           <button onClick={() => void exportManifest()} disabled={exporting} className="flex items-center gap-2 rounded-xl bg-cyan px-4 text-[9px] font-bold text-[#06100f] disabled:opacity-50">
             <Download size={13} /> {exporting ? "CERTIFYING…" : "EXPORT MANIFEST"}
           </button>
@@ -109,6 +114,14 @@ export function CaseWorkspace({ caseId }: { caseId: string }) {
       </section>
 
       <EvidenceTimeline events={timeline} />
+
+      {showReport && (
+        <ReportGenerator
+          caseId={caseId}
+          caseReference={caseData.reference}
+          onClose={() => setShowReport(false)}
+        />
+      )}
     </div>
   );
 }
