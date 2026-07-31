@@ -80,7 +80,12 @@ export function ReportGenerator({
       );
 
       if (!response.ok) {
-        throw new Error(`Report generation failed: ${response.statusText}`);
+        let msg = response.statusText;
+        try {
+          const errData = await response.json();
+          if (errData.error) msg = errData.error;
+        } catch {}
+        throw new Error(`Report generation failed: ${msg}`);
       }
 
       const blob = await response.blob();
