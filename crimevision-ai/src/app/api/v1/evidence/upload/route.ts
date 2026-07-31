@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { store } from "@/lib/store";
+import { supabase } from "@/lib/supabase";
 import { randomUUID, createHash } from "node:crypto";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -34,6 +35,24 @@ export async function POST(request: NextRequest) {
     const filePath = join(process.cwd(), "storage", storageKey);
     
     await writeFile(filePath, buffer);
+
+    // Upload to Supabase Storage Bucket if Supabase is configured
+    if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      try {
+        const bucketName = process.env.SUPABASE_STORAGE_BUCKET || "evidence";
+        const { error: storageError } = await supabase.storage
+          .from(bucketName)
+          .upload(`${caseId}/${evidenceId}-${file.name}`, buffer, {
+            contentType: file.type,
+            upsert: true,
+          });
+        if (storageError) {
+          console.warn("Supabase bucket upload warning:", storageError.message);
+        }
+      } catch (err) {
+        console.warn("Supabase bucket upload exception:", err);
+      }
+    }
 
     let modality = "UNKNOWN";
     if (file.type.startsWith("image/")) modality = "PHOTO";
